@@ -1,5 +1,7 @@
 FROM rustlang/rust:nightly-slim
 
+RUN apt update && apt install cmake -y
+
 COPY dummy.rs .
 
 # If this changed likely the Cargo.toml changed so lets trigger the
