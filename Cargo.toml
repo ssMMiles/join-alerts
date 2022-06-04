@@ -8,7 +8,7 @@ name = "guild-counter"
 path = "src/main.rs"
 
 [dependencies]
-twilight-gateway = { version = "0.11.0", features = ["simd-json", "zlib-simd"] }
+twilight-gateway = { version = "0.10.2", features = ["simd-json", "zlib-simd"] }
 futures-util = "0.3"
 tokio = { version = "1.18.2", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }

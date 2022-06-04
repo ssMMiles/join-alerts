@@ -12,57 +12,39 @@ struct MemberData {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    let token = env::var("DISCORD_TOKEN")?;
-
-    let (cluster, mut events) = ClusterBuilder::new(client.token().unwrap().to_string(), intents)
-        .shard_scheme(ShardScheme::try_from((
-            (cluster_id * shards_per_cluster..(cluster_id + 1) * shards_per_cluster),
-            shards_per_cluster * clusters,
-        ))?)
-        .presence(UpdatePresencePayload {
-            activities: vec![Activity {
-                application_id: None,
-                assets: None,
-                buttons: vec![],
-                created_at: None,
-                details: None,
-                emoji: None,
-                flags: None,
-                id: None,
-                instance: None,
-                kind: ActivityType::Watching,
-                name: "my shiny new gears turning".to_string(),
-                party: None,
-                secrets: None,
-                state: None,
-                timestamps: None,
-                url: None,
-            }],
-            afk: false,
-            since: None,
-            status: Status::Online,
-        })
-        .build()
-        .await?;
-
-    let (cluster, mut events) = {
-        let token = env::var("DISCORD_TOKEN")?;
-
-        let intents = Intents::GUILD_MEMBERS;
-        let (shard, events) = Shard::new(token, intents).await?;
-
-        match shard.start().await {
-            Ok(_) => println!("Gateway connected."),
-            Err(err) => println!("Error: {}", err),
-        }
-
-        (events, shard)
-    };
+    let (cluster, mut events) =
+        ClusterBuilder::new(env::var("DISCORD_TOKEN"), Intents::GUILD_MEMBERS)
+            .build()
+            .await?;
 
     let target = env::var("TARGET_URI")?;
     let client = reqwest::Client::new();
 
     while let Some(event) = events.next().await {
+        match event {
+            Event::MemberAdd(member) => {
+                let member_data = MemberData {
+                    guild_id: member.guild_id.to_string(),
+                    member_id: member.user.id.to_string(),
+                };
+                let json = serde_json::to_string(&member_data).unwrap();
+                let res = client.post(&target).body(json).send().await?;
+                println!("{:?}", res);
+            }
+
+            Event::ShardConnected(shard) => {
+                println!("Shard #{} ready!", shard.id);
+            }
+
+            Event::ShardDisconnected(shard) => {
+                println!("Shard #{} Disconnected!", shard.id);
+            }
+
+            Event::Resumed(shard) => {
+                println!("Shard #{} resumed.", shard.id);
+            }
+        }
+
         if let Event::MemberAdd(member) = event {
             let data = MemberData {
                 guild_id: member.guild_id.to_string(),
