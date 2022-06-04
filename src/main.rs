@@ -1,66 +1,81 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-
 use futures_util::StreamExt;
-use rocket::{get, ignite, routes, State};
-use rocket_contrib::json::JsonValue;
-use std::{
-    collections::HashSet,
-    env,
-    error::Error,
-    sync::{Arc, Mutex},
-};
+use serde_derive::Serialize;
+use std::{env, error::Error};
+use twilight_gateway::cluster::{ClusterBuilder, ShardScheme};
 use twilight_gateway::{Event, Intents, Shard};
 
-#[macro_use]
-extern crate rocket_contrib;
+#[derive(Serialize)]
+struct MemberData {
+    pub guild_id: String,
+    pub member_id: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    let (mut events, _shard) = {
+    let token = env::var("DISCORD_TOKEN")?;
+
+    let (cluster, mut events) = ClusterBuilder::new(client.token().unwrap().to_string(), intents)
+        .shard_scheme(ShardScheme::try_from((
+            (cluster_id * shards_per_cluster..(cluster_id + 1) * shards_per_cluster),
+            shards_per_cluster * clusters,
+        ))?)
+        .presence(UpdatePresencePayload {
+            activities: vec![Activity {
+                application_id: None,
+                assets: None,
+                buttons: vec![],
+                created_at: None,
+                details: None,
+                emoji: None,
+                flags: None,
+                id: None,
+                instance: None,
+                kind: ActivityType::Watching,
+                name: "my shiny new gears turning".to_string(),
+                party: None,
+                secrets: None,
+                state: None,
+                timestamps: None,
+                url: None,
+            }],
+            afk: false,
+            since: None,
+            status: Status::Online,
+        })
+        .build()
+        .await?;
+
+    let (cluster, mut events) = {
         let token = env::var("DISCORD_TOKEN")?;
 
-        let intents = Intents::GUILDS;
+        let intents = Intents::GUILD_MEMBERS;
         let (shard, events) = Shard::new(token, intents).await?;
 
-        shard.start().await?;
+        match shard.start().await {
+            Ok(_) => println!("Gateway connected."),
+            Err(err) => println!("Error: {}", err),
+        }
 
         (events, shard)
     };
 
-    let mut guilds: HashSet<u64> = HashSet::new();
-    let state: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
-
-    let guild_count_mutex = state.clone();
-
-    tokio::task::spawn_blocking(move || {
-        ignite()
-            .mount("/", routes![get_guild_count])
-            .manage(state.clone())
-            .launch();
-    });
+    let target = env::var("TARGET_URI")?;
+    let client = reqwest::Client::new();
 
     while let Some(event) = events.next().await {
-        if let Event::GuildCreate(guild) = event {
-            guilds.insert(u64::from(guild.id));
-            *guild_count_mutex.lock().unwrap() = guilds.len() as u64;
+        if let Event::MemberAdd(member) = event {
+            let data = MemberData {
+                guild_id: member.guild_id.to_string(),
+                member_id: member.user.id.to_string(),
+            };
+
+            client.post(&target).json(&data).send().await?;
 
             continue;
         }
 
-        if let Event::GuildDelete(guild) = event {
-            guilds.remove(&u64::from(guild.id));
-            *guild_count_mutex.lock().unwrap() = guilds.len() as u64;
-
-            continue;
-        }
+        events::handle_gateway_event(id, event)
     }
 
     Ok(())
-}
-
-#[get("/")]
-fn get_guild_count(guilds: State<Arc<Mutex<u64>>>) -> JsonValue {
-    return json!({
-      "count": *guilds.lock().unwrap()
-    });
 }
