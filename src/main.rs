@@ -1,8 +1,10 @@
 use futures_util::StreamExt;
 use serde_derive::Serialize;
-use std::{env, error::Error};
-use twilight_gateway::cluster::{ClusterBuilder, ShardScheme};
-use twilight_gateway::{Event, Intents, Shard};
+use std::{env, error::Error, sync::Arc};
+use twilight_gateway::cluster::ClusterBuilder;
+use twilight_gateway::{Event, Intents};
+
+use reqwest::Client;
 
 #[derive(Serialize)]
 struct MemberData {
@@ -12,52 +14,64 @@ struct MemberData {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    let (cluster, mut events) =
-        ClusterBuilder::new(env::var("DISCORD_TOKEN"), Intents::GUILD_MEMBERS)
-            .build()
-            .await?;
+    let token: String = env::var("DISCORD_TOKEN")?;
+    let intents: Intents = Intents::GUILD_MEMBERS;
+
+    let (cluster, mut events) = ClusterBuilder::new(token, intents).build().await?;
+
+    let cluster = Arc::new(cluster);
+    cluster.up().await;
 
     let target = env::var("TARGET_URI")?;
     let client = reqwest::Client::new();
 
-    while let Some(event) = events.next().await {
-        match event {
-            Event::MemberAdd(member) => {
-                let member_data = MemberData {
-                    guild_id: member.guild_id.to_string(),
-                    member_id: member.user.id.to_string(),
-                };
-                let json = serde_json::to_string(&member_data).unwrap();
-                let res = client.post(&target).body(json).send().await?;
-                println!("{:?}", res);
-            }
+    while let Some((shard_id, event)) = events.next().await {
+        tokio::spawn(handle_event(
+            shard_id,
+            event,
+            client.clone(),
+            target.clone(),
+        ));
+    }
 
-            Event::ShardConnected(shard) => {
-                println!("Shard #{} ready!", shard.id);
-            }
+    Ok(())
+}
 
-            Event::ShardDisconnected(shard) => {
-                println!("Shard #{} Disconnected!", shard.id);
-            }
-
-            Event::Resumed(shard) => {
-                println!("Shard #{} resumed.", shard.id);
-            }
-        }
-
-        if let Event::MemberAdd(member) = event {
-            let data = MemberData {
+async fn handle_event(shard_id: u64, event: Event, client: Client, target: String) {
+    match event {
+        Event::MemberAdd(member) => {
+            let member_data = MemberData {
                 guild_id: member.guild_id.to_string(),
                 member_id: member.user.id.to_string(),
             };
 
-            client.post(&target).json(&data).send().await?;
+            let res = client.post(&target).json(&member_data).send().await;
 
-            continue;
+            match res {
+                Ok(res) => {
+                    if res.status() != 200 {
+                        println!(
+                            "Unexpected Result on posting Member Join event: {}",
+                            res.status()
+                        );
+                    }
+                }
+                Err(e) => println!("Error on posting Member Join event: {}", e),
+            }
         }
 
-        events::handle_gateway_event(id, event)
-    }
+        Event::ShardConnected(_) => {
+            println!("Shard #{} ready!", shard_id);
+        }
 
-    Ok(())
+        Event::ShardDisconnected(_) => {
+            println!("Shard #{} Disconnected!", shard_id);
+        }
+
+        Event::Resumed => {
+            println!("Shard #{} resumed.", shard_id);
+        }
+
+        _ => {}
+    }
 }
