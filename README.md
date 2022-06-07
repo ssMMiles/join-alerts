@@ -1,12 +1,13 @@
-# Guild Counter
+# Join Alerts
 
-A standalone service for keeping track of a Discord bot's guild count. 
+Gateway service for relaying MEMBER_JOIN events.
 
-Takes a single `DISCORD_TOKEN` environment variable, port and listening address can be configured in `Rocket.toml`. Default Port: 9080.
+Takes `DISCORD_TOKEN` and `TARGET_URI` environment variables, connects a single shard to the gateway, and forwards all MEMBER_JOIN events to the target URI.
 
-## GET /
+## Payload
 ```json
 {
-  "count": 69
+  "guild_id": 123456789123456789,
+  "user_id": 123456789123456789
 }
 ```
