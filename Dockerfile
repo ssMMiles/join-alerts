@@ -6,7 +6,7 @@ COPY dummy.rs .
 
 # If this changed likely the Cargo.toml changed so lets trigger the
 # recopying of it anyways
-COPY Cargo.lock Cargo.toml .cargo ./
+COPY Cargo.lock Cargo.toml ./
 
 # We'll get to what this substitution is for but replace main.rs with
 # lib.rs if this is a library
